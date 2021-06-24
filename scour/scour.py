@@ -3426,6 +3426,71 @@ def properlySizeDoc(docElement, options):
     docElement.removeAttribute('height')
 
 
+ def unwrapTransform(element):      
+     val = element.getAttribute("transform")
+     if val == '':
+         return
+     transform = svg_transform_parser.parse(val)
+         # NOTE: as matrix(a b c d e f) in SVG means the matrix:
+     # |¯  a  c  e  ¯|   make constants   |¯  A1  A2  A3  ¯|
+     # |   b  d  f   |  translating them  |   B1  B2  B3   |
+     # |_  0  0  1  _|  to more readable  |_  0    0   1  _|
+     if len(transform) == 1 and transform[0][0] == 'matrix':
+         matrix = A1, B1, A2, B2, A3, B3 = transform[0][1]
+         transform[0] = ('translate', [A3, B3])
+         ScaleA = Decimal(math.sqrt(A1**2 + A2**2))
+         ScaleB = Decimal(math.sqrt(B1**2 + B2**2))
+ 
+         # |¯  cos(A) -sin(A)    0    ¯|  Rotation by angle A,
+         # |   sin(A)  cos(A)    0     |  clockwise, about the origin.
+         # |_    0       0       1    _|  A is in degrees, [-180...180].
+         sin_A, cos_A = B1/ScaleB, A1/ScaleA
+         A = Decimal(str(math.degrees(math.asin(float(sin_A)))))
+         if cos_A < 0:  
+             if sin_A < 0:
+                 A = -180 - A
+             else:
+                 A = 180 - A
+         transform.append(('rotate', [A]))
+         transform.append(('scale', [ScaleA, ScaleB]))
+         
+         newVal = serializeTransform(transform)
+         element.setAttribute("transform", newVal)
+         
+     return
+    
+def create_animations(doc,options):
+    frames = [elem for elem in doc.documentElement.getElementsByTagName('g') if "frame" in (elem.getAttribute('inkscape:label'))]
+    if len(frames)==0:
+        return   
+    Dlists = ["" for elem in frames[0].getElementsByTagName('path')] # handle more than one path in the frames
+    for elem in frames:
+        thePaths = elem.getElementsByTagName('path')
+        for i,p in enumerate(thePaths):
+            pathData = p.getAttribute("d")
+            if len(pathData)>5:
+               Dlists[i] += pathData +";\n"
+        theGroups = elem.getElementsByTagName('g')
+        for gr in theGroups:       
+            unwrapTransform(gr)
+    for i,dl in enumerate(Dlists):    
+        animel = doc.createElement('animate')   
+        animel.setAttribute('values',dl)
+        animel.setAttribute('attributeName','d')
+        animel.setAttribute('attributeType','XML')
+        animel.setAttribute('begin',options.animation_begin_string)
+        animel.setAttribute('dur',options.animation_dur_string)
+        animel.setAttribute('repeatCount',options.animation_repeat_string)
+        if options.animation_fill_freeze:
+            animel.setAttribute("fill","freeze")
+        frames[0].getElementsByTagName('path')[i].appendChild(animel)
+    for frame in frames[1:]:
+         #frame.setAttribute("id","processed")
+         frame.parentNode.removeChild(frame)
+        
+    return                      
+                                             
+                          
 def remapNamespacePrefix(node, oldprefix, newprefix):
     if node is None or node.nodeType != Node.ELEMENT_NODE:
         return
@@ -3666,6 +3731,10 @@ def scourString(in_string, options=None, stats=None):
 
     # remove descriptive elements
     stats.num_elements_removed += remove_descriptive_elements(doc, options)
+    
+    #uses inkskape namespace for layer name         
+    if options.create_animation:
+       create_animations(doc,options)
 
     # remove unneeded namespaced elements/attributes added by common editors
     if options.keep_editor_data is False:
@@ -3816,9 +3885,10 @@ def scourString(in_string, options=None, stats=None):
             clean_path(elem, options, stats)
             
     # clean path based animation data
-    for elem in doc.documentElement.getElementsByTagName('animate'):
-        if elem.getAttribute('attributeName') == 'd':
-            clean_animated_path(elem, options, stats)
+    if not options.create_animation:  
+        for elem in doc.documentElement.getElementsByTagName('animate'):
+            if elem.getAttribute('attributeName') == 'd':
+                clean_animated_path(elem, options, stats)
             
     # shorten ID names as much as possible
     if options.shorten_ids:
@@ -3970,6 +4040,23 @@ _option_group_optimization.add_option("--disable-group-collapsing",
 _option_group_optimization.add_option("--create-groups",
                                       action="store_true", dest="group_create", default=False,
                                       help="create <g> elements for runs of elements with identical attributes")
+                          
+ _option_group_optimization.add_option("--create-path-animation",
+                                      action="store_true", dest="create_animation", default=False,
+                                      help="create an animation node on first layer of similar named layers, concatinate all layers' d into its value")
+_option_group_optimization.add_option("--animation-begin-string",
+                             dest="animation_begin_string", default="0s", 
+                             help="begin string in the animation (default: %default)")
+_option_group_optimization.add_option("--animation-dur-string",
+                              dest="animation_dur_string", default="4s", 
+                             help="dur string in the animation (default: %default)")
+_option_group_optimization.add_option("--animation-repeat-string",
+                              dest="animation_repeat_string", default="indefinite", 
+                             help="repeat string in the animation (default: %default)")                                                            
+_option_group_optimization.add_option("--animation-fill-freeze",
+                                      action="store_true", dest="animation_fill_freeze", default=False,
+                                      help="add fill=freeze to keep last animation frame")                          
+                          
 _option_group_optimization.add_option("--keep-editor-data",
                                       action="store_true", dest="keep_editor_data", default=False,
                                       help="won't remove Inkscape, Sodipodi, Adobe Illustrator "
