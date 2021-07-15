@@ -2775,7 +2775,7 @@ def clean_animated_path(element, options, stats):
     if oldPathStr=="":
       return
     oldPathStrs = oldPathStr.split(';')
-    newPathStr = ";".join(map(lambda s:serializePath(svg_parser.parse(s),options),oldPathStrs)
+    newPathStr = ";".join(map(lambda s:serializePath(svg_parser.parse(s),options),oldPathStrs))
     element.setAttribute('values', newPathStr)
 
 def parseListOfPoints(s):
@@ -3426,7 +3426,7 @@ def properlySizeDoc(docElement, options):
     docElement.removeAttribute('height')
 
 
- def unwrapTransform(element):      
+def unwrapTransform(element):      
      val = element.getAttribute("transform")
      if val == '':
          return
@@ -3458,6 +3458,37 @@ def properlySizeDoc(docElement, options):
          element.setAttribute("transform", newVal)
          
      return
+
+def create_animations_from_frames(doc,sequence,options):
+    frames = [elem for elem in sequence.getElementsByTagName('g') if "frame" in (elem.getAttribute('inkscape:label'))]
+    if len(frames)==0:
+        return   
+    Dlists = ["" for elem in frames[0].getElementsByTagName('path')] # handle more than one path in the frames
+    for elem in frames:
+        thePaths = elem.getElementsByTagName('path')
+        for i,p in enumerate(thePaths):
+            pathData = p.getAttribute("d")
+            if len(pathData)>5:
+               Dlists[i] += pathData +";\n"
+        theGroups = elem.getElementsByTagName('g')
+        for gr in theGroups:       
+            unwrapTransform(gr)
+    for i,dl in enumerate(Dlists):    
+        animel = doc.createElement('animate')   
+        animel.setAttribute('values',dl)
+        animel.setAttribute('attributeName','d')
+        animel.setAttribute('attributeType','XML')
+        animel.setAttribute('begin',options.animation_begin_string)
+        animel.setAttribute('dur',options.animation_dur_string)
+        animel.setAttribute('repeatCount',options.animation_repeat_string)
+        if options.animation_fill_freeze:
+            animel.setAttribute("fill","freeze")
+        frames[0].getElementsByTagName('path')[i].appendChild(animel)
+    for frame in frames[1:]:
+         #frame.setAttribute("id","processed")
+         frame.parentNode.removeChild(frame)
+        
+    return   
     
 def create_animations(doc,options):
     frames = [elem for elem in doc.documentElement.getElementsByTagName('g') if "frame" in (elem.getAttribute('inkscape:label'))]
@@ -3489,7 +3520,14 @@ def create_animations(doc,options):
          frame.parentNode.removeChild(frame)
         
     return                      
-                                             
+         
+         
+         
+def create_animations_from_sequences(doc,options):
+    sequences = [elem for elem in doc.documentElement.getElementsByTagName('g') if "sequence" in (elem.getAttribute('inkscape:label'))]
+    for sequence in sequences:
+        create_animations_from_frames(doc,sequence,options)      
+    return                                     
                           
 def remapNamespacePrefix(node, oldprefix, newprefix):
     if node is None or node.nodeType != Node.ELEMENT_NODE:
@@ -3735,6 +3773,8 @@ def scourString(in_string, options=None, stats=None):
     #uses inkskape namespace for layer name         
     if options.create_animation:
        create_animations(doc,options)
+    if options.create_animation_from_sequences:
+       create_animations_from_sequences(doc,options)
 
     # remove unneeded namespaced elements/attributes added by common editors
     if options.keep_editor_data is False:
@@ -4041,9 +4081,12 @@ _option_group_optimization.add_option("--create-groups",
                                       action="store_true", dest="group_create", default=False,
                                       help="create <g> elements for runs of elements with identical attributes")
                           
- _option_group_optimization.add_option("--create-path-animation",
+_option_group_optimization.add_option("--create-path-animation",
                                       action="store_true", dest="create_animation", default=False,
-                                      help="create an animation node on first layer of similar named layers, concatinate all layers' d into its value")
+                                      help="create an animation node on first layer of layers named frame")
+_option_group_optimization.add_option("--create-path-animation-from-sequences",
+                                      action="store_true", dest="create_animation_from_sequences", default=False,
+                                      help="use layers named frame grouped under layers named sequence")
 _option_group_optimization.add_option("--animation-begin-string",
                              dest="animation_begin_string", default="0s", 
                              help="begin string in the animation (default: %default)")
@@ -4055,7 +4098,10 @@ _option_group_optimization.add_option("--animation-repeat-string",
                              help="repeat string in the animation (default: %default)")                                                            
 _option_group_optimization.add_option("--animation-fill-freeze",
                                       action="store_true", dest="animation_fill_freeze", default=False,
-                                      help="add fill=freeze to keep last animation frame")                          
+                                      help="add fill=freeze to keep last animation frame")    
+                                      
+                                        
+                                      #create_animation_from_sequences                    
                           
 _option_group_optimization.add_option("--keep-editor-data",
                                       action="store_true", dest="keep_editor_data", default=False,
